@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Syslog Dashboard</title>
+<style>
+:root { --bg:#0d0d0d; --panel:#1a1a1a; --border:#2a2a2a; --text:#e0e0e0; --muted:#666; --accent:#64d2ff; }
+*{ box-sizing:border-box; margin:0; padding:0; }
+body{ background:var(--bg); color:var(--text); font-family:'SF Mono','Menlo',monospace; font-size:13px; }
+
+header{ display:flex; align-items:center; gap:12px; padding:10px 20px; background:var(--panel); border-bottom:1px solid var(--border); }
+header h1{ font-size:15px; font-weight:700; color:var(--accent); }
+#clock{ font-size:22px; font-weight:700; color:#fff; margin-left:auto; }
+#date-str{ font-size:11px; color:var(--muted); text-align:right; margin-right:4px; }
+
+/* tabs */
+.tabs{ display:flex; background:var(--panel); border-bottom:1px solid var(--border); }
+.tab{ padding:9px 22px; cursor:pointer; font-size:12px; color:var(--muted); border-bottom:2px solid transparent; transition:color .15s; }
+.tab:hover{ color:var(--text); }
+.tab.active{ color:var(--accent); border-bottom-color:var(--accent); }
+
+/* status bar */
+#status-bar{
+  display:flex; align-items:center; gap:18px; padding:7px 18px;
+  font-size:12px; border-bottom:2px solid var(--border); background:#111; transition:border-color .4s;
+}
+#status-bar.receiving{ border-bottom-color:#30d158; }
+#status-bar.stale    { border-bottom-color:#ffcc00; }
+#status-bar.silent   { border-bottom-color:#444;    }
+.sb-dot{ width:10px; height:10px; border-radius:50%; background:#444; flex-shrink:0; }
+.sb-dot.on  { background:#30d158; box-shadow:0 0 6px #30d158; animation:pulse 1.5s infinite; }
+.sb-dot.warn{ background:#ffcc00; box-shadow:0 0 6px #ffcc00; }
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+#rx-label{ font-size:13px; font-weight:600; }
+#rx-label.on  { color:#30d158; }
+#rx-label.warn{ color:#ffcc00; }
+#rx-label.off { color:#666; }
+.sb-sep{ color:#333; }
+
+/* layout */
+.layout{ display:grid; grid-template-columns:200px 1fr; height:calc(100vh - 113px); }
+.sidebar{ background:var(--panel); border-right:1px solid var(--border); padding:12px 10px; overflow-y:auto; }
+.sidebar h2{ font-size:10px; text-transform:uppercase; letter-spacing:.12em; color:var(--muted); margin-bottom:7px; }
+.stat-item{ display:flex; justify-content:space-between; align-items:center; padding:5px 8px; border-radius:5px; margin-bottom:3px; cursor:pointer; transition:background .12s; }
+.stat-item:hover,.stat-item.active{ background:#252525; }
+.stat-dot{ width:7px; height:7px; border-radius:50%; flex-shrink:0; margin-right:7px; }
+.stat-name{ flex:1; }
+.stat-count{ color:var(--muted); font-size:11px; }
+.divider{ border:none; border-top:1px solid var(--border); margin:10px 0; }
+.src-badge{ display:flex; justify-content:space-between; padding:4px 8px; border-radius:4px; font-size:11px; background:#1e1e1e; cursor:pointer; margin-bottom:3px; }
+.src-badge:hover,.src-badge.active{ background:#2a2a2a; outline:1px solid #333; }
+
+/* toolbar */
+.toolbar{ display:flex; gap:8px; align-items:center; padding:8px 14px; background:var(--panel); border-bottom:1px solid var(--border); flex-wrap:wrap; }
+.toolbar input[type=text]{ flex:1; min-width:100px; background:#111; border:1px solid var(--border); color:var(--text); border-radius:5px; padding:5px 10px; font-family:inherit; font-size:12px; }
+.toolbar input[type=text]:focus{ outline:none; border-color:var(--accent); }
+.btn{ background:#252525; border:1px solid var(--border); color:var(--text); padding:5px 11px; border-radius:5px; cursor:pointer; font-size:12px; font-family:inherit; white-space:nowrap; }
+.btn:hover{ background:#303030; }
+.btn.active-filter{ color:#ffcc00; border-color:#66440088; }
+#pause-btn.paused{ color:#ffcc00; }
+
+/* history toolbar */
+#hist-toolbar{ display:flex; gap:8px; align-items:center; padding:10px 14px; background:var(--panel); border-bottom:1px solid var(--border); flex-wrap:wrap; }
+#hist-toolbar input[type=date],#hist-toolbar input[type=text],#hist-toolbar select{
+  background:#111; border:1px solid var(--border); color:var(--text);
+  border-radius:5px; padding:5px 10px; font-family:inherit; font-size:12px;
+}
+#hist-toolbar input[type=date]::-webkit-calendar-picker-indicator{ filter:invert(.6); }
+#hist-summary{ font-size:11px; color:var(--muted); margin-left:auto; }
+
+/* log table */
+.main-col{ display:flex; flex-direction:column; overflow:hidden; }
+.log-wrap{ flex:1; overflow:hidden; display:flex; flex-direction:column; }
+#log-container,#hist-container{ overflow-y:auto; flex:1; }
+table{ width:100%; border-collapse:collapse; }
+th{ position:sticky; top:0; background:#111; text-align:left; padding:7px 10px; font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; border-bottom:1px solid var(--border); z-index:2; white-space:nowrap; }
+td{ padding:4px 10px; border-bottom:1px solid #1c1c1c; vertical-align:top; word-break:break-all; }
+tr.new-row{ animation:flash .7s ease-out; }
+@keyframes flash{from{background:rgba(100,210,255,.15)}to{background:transparent}}
+tr:hover td{ background:#1d1d1d; }
+.sev-badge{ display:inline-block; padding:1px 6px; border-radius:4px; font-size:10px; font-weight:700; background:rgba(255,255,255,.07); white-space:nowrap; }
+.ts { color:var(--muted); font-size:11px; white-space:nowrap; }
+.src{ color:var(--accent); white-space:nowrap; }
+.fac{ color:#bf8fff; white-space:nowrap; }
+
+/* page tab content */
+.page{ display:none; flex-direction:column; flex:1; overflow:hidden; }
+.page.active{ display:flex; }
+
+/* calendar strip */
+#cal-strip{ display:flex; gap:6px; flex-wrap:wrap; padding:10px 14px; background:#111; border-bottom:1px solid var(--border); }
+.cal-day{ padding:4px 10px; border-radius:5px; font-size:11px; cursor:pointer; background:#1e1e1e; border:1px solid transparent; }
+.cal-day:hover{ background:#252525; }
+.cal-day.selected{ border-color:var(--accent); color:var(--accent); background:#0a1a22; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Syslog Dashboard</h1>
+  <div style="margin-left:auto;text-align:right">
+    <div id="date-str"></div>
+    <div id="clock">--:--:--</div>
+  </div>
+</header>
+
+<!-- tabs -->
+<div class="tabs">
+  <div class="tab active" onclick="showPage('live')">● ライブ</div>
+  <div class="tab" onclick="showPage('history')">📅 履歴</div>
+</div>
+
+<!-- status bar (live only) -->
+<div id="status-bar" class="silent">
+  <div style="display:flex;align-items:center;gap:6px">
+    <div class="sb-dot off" id="sb-dot"></div>
+    <span id="rx-label" class="off">待機中</span>
+  </div>
+  <span class="sb-sep">|</span>
+  <span>最終受信: <span id="last-rx">—</span></span>
+  <span class="sb-sep">|</span>
+  <span>レート: <span id="ppm" style="color:var(--accent)">—</span> pkt/min</span>
+  <span class="sb-sep">|</span>
+  <span>合計: <span id="total-count" style="font-weight:600">0</span> 件</span>
+</div>
+
+<div class="layout">
+  <!-- sidebar -->
+  <aside class="sidebar">
+    <h2>Severity</h2>
+    <div id="sev-stats"></div>
+    <hr class="divider">
+    <h2>Sources</h2>
+    <div id="src-stats"></div>
+    <hr class="divider">
+    <h2>種別</h2>
+    <div id="kind-stats"></div>
+  </aside>
+
+  <!-- main area -->
+  <div class="main-col">
+
+    <!-- ── LIVE page ── -->
+    <div class="page active" id="page-live">
+      <div class="toolbar">
+        <input type="text" id="filter" placeholder="フィルター... (正規表現可)">
+        <button class="btn" id="pause-btn" onclick="togglePause()">⏸ 一時停止</button>
+        <button class="btn" onclick="clearLogs()">クリア</button>
+        <button class="btn" onclick="exportCSV(allLogs,'live')">CSV保存</button>
+      </div>
+      <div class="log-wrap">
+        <div id="log-container">
+          <table>
+            <thead><tr>
+              <th style="width:76px">時刻</th>
+              <th style="width:110px">送信元</th>
+              <th style="width:72px">Severity</th>
+              <th style="width:80px">種別</th>
+              <th>メッセージ</th>
+            </tr></thead>
+            <tbody id="log-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── HISTORY page ── -->
+    <div class="page" id="page-history">
+      <!-- calendar strip -->
+      <div id="cal-strip"></div>
+
+      <div id="hist-toolbar">
+        <input type="date" id="h-from">
+        <span style="color:var(--muted)">〜</span>
+        <input type="date" id="h-to">
+        <input type="text" id="h-kw" placeholder="キーワード" style="width:130px">
+        <select id="h-sev">
+          <option value="">全Severity</option>
+          <option>emerg</option><option>alert</option><option>crit</option>
+          <option>err</option><option>warning</option><option>notice</option>
+          <option>info</option><option>debug</option>
+        </select>
+        <button class="btn" onclick="loadHistory()" style="background:#1a3a4a;color:#64d2ff;border-color:#2a5a6a">検索</button>
+        <button class="btn" onclick="exportCSV(histLogs,'history')">CSV保存</button>
+        <span id="hist-summary"></span>
+      </div>
+
+      <div class="log-wrap">
+        <div id="hist-container">
+          <table>
+            <thead><tr>
+              <th style="width:136px">日時</th>
+              <th style="width:110px">送信元</th>
+              <th style="width:72px">Severity</th>
+              <th style="width:80px">種別</th>
+              <th>メッセージ</th>
+            </tr></thead>
+            <tbody id="hist-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const COLORS={emerg:"#ff2d55",alert:"#ff6b35",crit:"#ff9500",err:"#ffcc00",warning:"#ffd60a",notice:"#30d158",info:"#64d2ff",debug:"#8e8e93"};
+let allLogs=[], histLogs=[], paused=false, filterSev=null, filterSrc=null;
+let lastRxTime=null, rxTimes=[], currentPage="live";
+
+// ── Clock ──────────────────────────────────────────────────────────────────
+function updateClock(){
+  const n=new Date();
+  document.getElementById("clock").textContent=n.toLocaleTimeString("ja-JP",{hour12:false});
+  document.getElementById("date-str").textContent=n.toLocaleDateString("ja-JP",{year:"numeric",month:"2-digit",day:"2-digit",weekday:"short"});
+}
+setInterval(updateClock,500); updateClock();
+
+// ── Status bar ─────────────────────────────────────────────────────────────
+function updateStatusBar(){
+  const now=Date.now();
+  rxTimes=rxTimes.filter(t=>now-t<60000);
+  document.getElementById("ppm").textContent=rxTimes.length;
+  document.getElementById("total-count").textContent=allLogs.length.toLocaleString();
+  const bar=document.getElementById("status-bar"),dot=document.getElementById("sb-dot"),lbl=document.getElementById("rx-label");
+  if(!lastRxTime){bar.className="silent";dot.className="sb-dot off";lbl.className="off";lbl.textContent="未受信";document.getElementById("last-rx").textContent="—";return;}
+  const sec=Math.floor((now-lastRxTime)/1000);
+  document.getElementById("last-rx").textContent=sec<3?"今":sec<60?sec+"秒前":Math.floor(sec/60)+"分前";
+  if(sec<5){bar.className="receiving";dot.className="sb-dot on";lbl.className="on";lbl.textContent="受信中";}
+  else if(sec<30){bar.className="stale";dot.className="sb-dot warn";lbl.className="warn";lbl.textContent="受信停止中";}
+  else{bar.className="silent";dot.className="sb-dot off";lbl.className="off";lbl.textContent="受信なし";}
+}
+setInterval(updateStatusBar,1000);
+
+// ── SSE ────────────────────────────────────────────────────────────────────
+const es=new EventSource("/api/stream");
+es.onmessage=e=>{
+  const entry=JSON.parse(e.data);
+  allLogs.unshift(entry);
+  if(allLogs.length>2000)allLogs.pop();
+  lastRxTime=Date.now(); rxTimes.push(lastRxTime);
+  updateStatusBar(); updateStats();
+  if(!paused) prependRow(entry);
+};
+
+// ── Initial load ───────────────────────────────────────────────────────────
+fetch("/api/logs").then(r=>r.json()).then(data=>{allLogs=data;renderAll();updateStats();updateStatusBar();});
+
+// ── Page switch ────────────────────────────────────────────────────────────
+function showPage(p){
+  currentPage=p;
+  document.querySelectorAll(".page").forEach(el=>el.classList.remove("active"));
+  document.querySelectorAll(".tab").forEach(el=>el.classList.remove("active"));
+  document.getElementById("page-"+p).classList.add("active");
+  document.querySelectorAll(".tab")[p==="live"?0:1].classList.add("active");
+  document.getElementById("status-bar").style.display=p==="live"?"flex":"none";
+  if(p==="history") initHistory();
+}
+
+// ── Live render ────────────────────────────────────────────────────────────
+function buildRow(entry,animate,fullDate){
+  const q=document.getElementById("filter").value.trim();
+  if(!matchFilter(entry,q))return null;
+  if(filterSev&&entry.severity!==filterSev)return null;
+  if(filterSrc&&entry.src!==filterSrc)return null;
+  const tr=document.createElement("tr");
+  if(animate)tr.classList.add("new-row");
+  const c=COLORS[entry.severity]||"#fff";
+  const ts=fullDate?fmtFull(entry.ts_full):entry.ts;
+  tr.innerHTML=`<td class="ts">${ts}</td><td class="src">${esc(entry.src)}</td><td><span class="sev-badge" style="color:${c};border:1px solid ${c}44">${entry.severity}</span></td><td class="fac">${esc(entry.facility)}</td><td>${esc(entry.msg)}</td>`;
+  return tr;
+}
+function prependRow(entry){
+  const tbody=document.getElementById("log-body");
+  const tr=buildRow(entry,true,false);if(!tr)return;
+  tbody.insertBefore(tr,tbody.firstChild);
+  if(tbody.children.length>600)tbody.removeChild(tbody.lastChild);
+  const c=document.getElementById("log-container");
+  if(c.scrollTop<40)c.scrollTop=0;
+}
+function renderAll(){
+  const tbody=document.getElementById("log-body");tbody.innerHTML="";
+  const q=document.getElementById("filter").value.trim();let n=0;
+  for(const e of allLogs){const tr=buildRow(e,false,false);if(!tr)continue;tbody.appendChild(tr);if(++n>=400)break;}
+}
+document.getElementById("filter").addEventListener("input",renderAll);
+
+// ── History ────────────────────────────────────────────────────────────────
+async function initHistory(){
+  const today=new Date().toISOString().slice(0,10);
+  document.getElementById("h-from").value=today;
+  document.getElementById("h-to").value=today;
+  await loadCalendar();
+  await loadHistory();
+}
+
+async function loadCalendar(){
+  const dates=await fetch("/api/history/dates").then(r=>r.json());
+  const strip=document.getElementById("cal-strip");
+  const today=new Date().toISOString().slice(0,10);
+  strip.innerHTML=dates.map(d=>`<div class="cal-day${d===today?" selected":""}" onclick="pickDay('${d}')">${fmtDay(d)}</div>`).join("")||`<span style="color:var(--muted);font-size:12px">まだ記録なし</span>`;
+}
+
+function pickDay(d){
+  document.getElementById("h-from").value=d;
+  document.getElementById("h-to").value=d;
+  document.querySelectorAll(".cal-day").forEach(el=>{el.classList.toggle("selected",el.textContent===fmtDay(d));});
+  loadHistory();
+}
+
+async function loadHistory(){
+  const from=document.getElementById("h-from").value;
+  const to  =document.getElementById("h-to").value;
+  const kw  =document.getElementById("h-kw").value;
+  const sev =document.getElementById("h-sev").value;
+  const params=new URLSearchParams({date_from:from,date_to:to,keyword:kw,severity:sev});
+  histLogs=await fetch("/api/history?"+params).then(r=>r.json());
+  renderHistory();
+  document.getElementById("hist-summary").textContent=`${histLogs.length.toLocaleString()} 件`;
+}
+document.getElementById("h-kw").addEventListener("keydown",e=>{if(e.key==="Enter")loadHistory();});
+
+function renderHistory(){
+  const tbody=document.getElementById("hist-body");tbody.innerHTML="";
+  for(const e of histLogs){
+    const c=COLORS[e.severity]||"#fff";
+    const tr=document.createElement("tr");
+    tr.innerHTML=`<td class="ts">${fmtFull(e.ts_full)}</td><td class="src">${esc(e.src||"")}</td><td><span class="sev-badge" style="color:${c};border:1px solid ${c}44">${e.severity}</span></td><td class="fac">${esc(e.facility||"")}</td><td>${esc(e.msg||"")}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+// ── Sidebar stats ──────────────────────────────────────────────────────────
+function updateStats(){
+  const sc={},ss={},sk={};
+  for(const e of allLogs){sc[e.severity]=(sc[e.severity]||0)+1;ss[e.src]=(ss[e.src]||0)+1;sk[e.facility]=(sk[e.facility]||0)+1;}
+  const order=["emerg","alert","crit","err","warning","notice","info","debug"];
+  document.getElementById("sev-stats").innerHTML=order.map(s=>`
+    <div class="stat-item${filterSev===s?" active":""}" onclick="toggleSev('${s}')">
+      <span class="stat-dot" style="background:${COLORS[s]}"></span>
+      <span class="stat-name">${s}</span><span class="stat-count">${sc[s]||0}</span>
+    </div>`).join("");
+  document.getElementById("src-stats").innerHTML=
+    Object.entries(ss).sort((a,b)=>b[1]-a[1]).slice(0,10).map(([ip,n])=>`
+    <div class="src-badge${filterSrc===ip?" active":""}" onclick="toggleSrc('${ip}')">
+      <span>${ip}</span><span>${n}</span></div>`).join("");
+  document.getElementById("kind-stats").innerHTML=
+    Object.entries(sk).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([k,n])=>`
+    <div class="src-badge" onclick="setFilter('${k}')"><span>${k}</span><span>${n}</span></div>`).join("");
+}
+function toggleSev(s){filterSev=filterSev===s?null:s;updateStats();renderAll();}
+function toggleSrc(s){filterSrc=filterSrc===s?null:s;updateStats();renderAll();}
+function setFilter(k){document.getElementById("filter").value=k;renderAll();}
+
+// ── Controls ───────────────────────────────────────────────────────────────
+function togglePause(){paused=!paused;const b=document.getElementById("pause-btn");b.textContent=paused?"▶ 再開":"⏸ 一時停止";b.classList.toggle("paused",paused);}
+function clearLogs(){allLogs=[];document.getElementById("log-body").innerHTML="";updateStats();updateStatusBar();}
+function exportCSV(data,name){
+  const rows=[["datetime","src","severity","facility","msg"]];
+  data.forEach(e=>rows.push([e.ts_full,e.src,e.severity,e.facility,'"'+(e.msg||"").replace(/"/g,'""')+'"']));
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([rows.map(r=>r.join(",")).join("\n")],{type:"text/csv"}));
+  a.download=`syslog_${name}_${Date.now()}.csv`;a.click();
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function matchFilter(e,q){if(!q)return true;try{const re=new RegExp(q,"i");return re.test(e.msg)||re.test(e.src)||re.test(e.facility)||re.test(e.severity);}catch{return(e.msg||"").includes(q);}}
+function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+function fmtFull(ts){if(!ts)return"";const d=new Date(ts);if(isNaN(d))return ts;return d.toLocaleString("ja-JP",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false});}
+function fmtDay(d){const dt=new Date(d+"T00:00:00");return dt.toLocaleDateString("ja-JP",{month:"numeric",day:"numeric",weekday:"short"});}
+</script>
+</body>
+</html>
