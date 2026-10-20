@@ -1,9 +1,9 @@
-# Router Syslog Dashboard
+# Router Syslog Monitor
 
-Buffalo ルーター（AirStation等）から syslog を受信し、リアルタイムでモニタリングするダッシュボードです。  
+Buffalo ルーター（AirStation等）から syslog を受信し、リアルタイムでモニタリングする監視画面です。  
 受信したログは SQLite に永続保存され、後から日付・キーワードで検索できます。
 
-![dashboard](https://img.shields.io/badge/FastAPI-0.100+-009688?logo=fastapi) ![python](https://img.shields.io/badge/Python-3.9+-3776AB?logo=python) ![sqlite](https://img.shields.io/badge/SQLite-built--in-003B57?logo=sqlite)
+![monitor](https://img.shields.io/badge/FastAPI-0.100+-009688?logo=fastapi) ![python](https://img.shields.io/badge/Python-3.9+-3776AB?logo=python) ![sqlite](https://img.shields.io/badge/SQLite-built--in-003B57?logo=sqlite)
 
 ## 機能
 
@@ -59,14 +59,14 @@ http://localhost:8080
 syslog-dashboard/
 ├── server.py          # syslog UDP受信 + FastAPI Web サーバー
 ├── templates/
-│   └── index.html     # ダッシュボード UI（vanilla JS + SSE）
+│   └── index.html     # 監視画面 UI（vanilla JS + SSE）
 ├── start.sh           # 起動スクリプト
 ├── setup-port-forward.sh  # pfctl ポート転送設定
 ├── syslog.db          # 受信ログ DB（自動生成・git管理外）
 └── .gitignore
 ```
 
-## ダッシュボード画面
+## 監視画面画面
 
 ### ライブタブ
 - 受信したログをリアルタイムストリーミング表示
